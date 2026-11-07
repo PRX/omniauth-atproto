@@ -6,8 +6,8 @@ module OmniAuth
   module Atproto
     class KeyManager
       class << self
-        KEY_PATH = 'config/atproto_private_key.pem'
-        JWK_PATH = 'config/atproto_jwk.json'
+        KEY_PATH = 'config/atproto_private_key.pem'.freeze
+        JWK_PATH = 'config/atproto_jwk.json'.freeze
 
         def generate_key_pair
           key = OpenSSL::PKey::EC.generate('prime256v1')

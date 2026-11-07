@@ -23,7 +23,7 @@ module OmniAuth
         lambda do |env|
           session = env["rack.session"]
 
-          if env["rack.request.form_hash"] && handle = env["rack.request.form_hash"]["handle"]
+          if env["rack.request.form_hash"] && (handle = env["rack.request.form_hash"]["handle"])
             resolver = DIDKit::Resolver.new
             did = resolver.resolve_handle(handle)
 
@@ -102,8 +102,10 @@ module OmniAuth
         end
         # we cannot keep everything in session (cookie overflow error)
         fields = %w[issuer authorization_endpoint token_endpoint]
-        result.select { |k, _v| fields.include?(k) }
+        result.slice(*fields)
       end
+
+      private_class_method :get_authorization_server, :get_authorization_data
     end
   end
 end
