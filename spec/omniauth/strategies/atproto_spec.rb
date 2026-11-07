@@ -1,8 +1,6 @@
 require 'spec_helper'
 
 RSpec.describe OmniAuth::Strategies::Atproto do
-  include AtprotoStubs
-
   let(:app) do
     key, jwk = client_key_pair
     client_id = AtprotoStubs::CLIENT_ID
