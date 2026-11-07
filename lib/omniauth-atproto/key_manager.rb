@@ -58,7 +58,7 @@ module OmniAuth
           load_or_generate_keys
         end
 
-        private
+      private
 
         def load_or_generate_keys
           if File.exist?(KEY_PATH) && File.exist?(JWK_PATH)
