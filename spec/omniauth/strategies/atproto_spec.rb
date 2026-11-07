@@ -6,8 +6,6 @@ RSpec.describe OmniAuth::Strategies::Atproto do
     client_id = AtprotoStubs::CLIENT_ID
     Rack::Builder.new do
       use Rack::Session::Cookie, secret: 'x' * 64
-      # Parses the form before the strategy, as Rails and Sinatra do
-      use Rack::MethodOverride
       use OmniAuth::Strategies::Atproto, client_id, nil, scope: 'atproto', private_key: key, client_jwk: jwk
       run ->(env) { [200, {'content-type' => 'application/json'}, [env['omniauth.auth'].to_h.to_json]] }
     end
@@ -47,8 +45,20 @@ RSpec.describe OmniAuth::Strategies::Atproto do
       expect(redirect_params['code_challenge']).not_to be_empty
     end
 
+    it 'reads the handle from the query string, leaving it out of the redirect_uri' do
+      post "/auth/atproto?handle=#{AtprotoStubs::HANDLE}"
+
+      expect(last_response.location).to start_with("#{AtprotoStubs::ISSUER}/oauth/authorize?")
+      expect(redirect_params['redirect_uri']).to eq('https://app.example.com/auth/atproto/callback')
+    end
+
+    it 'fails cleanly without a handle' do
+      post '/auth/atproto'
+
+      expect(failure_message).to eq('missing_handle')
+    end
+
     it 'fails cleanly when the handle does not resolve' do
-      pending 'setup raises instead of failing the strategy'
       stub_request(:get, "https://#{AtprotoStubs::HANDLE}/.well-known/atproto-did").to_return(status: 404)
 
       post '/auth/atproto', handle: AtprotoStubs::HANDLE
@@ -56,8 +66,15 @@ RSpec.describe OmniAuth::Strategies::Atproto do
       expect(failure_message).to eq('unknown_handle')
     end
 
+    it 'fails cleanly when the PDS names no authorization server' do
+      stub_protected_resource(authorization_servers: [])
+
+      post '/auth/atproto', handle: AtprotoStubs::HANDLE
+
+      expect(failure_message).to eq('invalid_auth_server')
+    end
+
     it 'fails cleanly when the authorization server metadata has the wrong issuer' do
-      pending 'discovery calls fail! on the class, which raises NoMethodError'
       stub_authorization_server(metadata_issuer: 'https://other.example.com')
 
       post '/auth/atproto', handle: AtprotoStubs::HANDLE
@@ -90,6 +107,12 @@ RSpec.describe OmniAuth::Strategies::Atproto do
 
   describe 'callback phase' do
     before { stub_discovery }
+
+    it 'fails cleanly without a request phase first' do
+      get '/auth/atproto/callback', code: 'auth-code', state: 'state'
+
+      expect(failure_message).to eq('missing_authorization_info')
+    end
 
     it 'exchanges the code at the token endpoint and returns the DID' do
       stub_token

@@ -26,9 +26,9 @@ module AtprotoStubs
       to_return(body: document.to_json, headers: {'Content-Type' => 'application/did+ld+json'})
   end
 
-  def stub_protected_resource(pds: PDS, issuer: ISSUER)
+  def stub_protected_resource(pds: PDS, issuer: ISSUER, authorization_servers: [issuer])
     stub_request(:get, "#{pds}/.well-known/oauth-protected-resource").
-      to_return(body: {resource: pds, authorization_servers: [issuer]}.to_json,
+      to_return(body: {resource: pds, authorization_servers: authorization_servers}.to_json,
                 headers: {'Content-Type' => 'application/json'})
   end
 

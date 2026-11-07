@@ -8,6 +8,16 @@ require 'faraday'
 module OmniAuth
   module Strategies
     class Atproto < OmniAuth::Strategies::OAuth2
+      # A discovery failure, with the key to fail the strategy with
+      class DiscoveryError < OmniAuth::Error
+        attr_reader :key
+
+        def initialize(key, message)
+          super(message)
+          @key = key
+        end
+      end
+
       option :fields, %i[handle]
       option :scope, 'atproto'
       option :pkce, true
@@ -19,35 +29,28 @@ module OmniAuth
         }
       end
 
-      def self.setup
-        lambda do |env|
-          session = env['rack.session']
-
-          if env['rack.request.form_hash'] && (handle = env['rack.request.form_hash']['handle'])
-            resolver = DIDKit::Resolver.new
-            did = resolver.resolve_handle(handle)
-
-            unless did
-              env['omniauth.strategy'].fail!(:unknown_handle,
-                                             OmniAuth::Error.new(
-                                               'Handle parameter did not resolve to a did'
-                                             ))
-            end
-
-            endpoint = resolver.resolve_did(did).pds_endpoint
-            auth_server = get_authorization_server(endpoint)
-            session['authorization_info'] = authorization_info = get_authorization_data(auth_server)
-          end
-
-          if authorization_info ||= session.delete('authorization_info')
-            env['omniauth.strategy'].options['client_options']['site'] = authorization_info['issuer']
-            env['omniauth.strategy'].options['client_options']['authorize_url'] = authorization_info['authorization_endpoint']
-            env['omniauth.strategy'].options['client_options']['token_url'] = authorization_info['token_endpoint']
-          end
-        end
+      # The handle can be posted in the form or the query string
+      def request_phase
+        authorization_info = discover_authorization_server(request.params['handle'])
+        session['authorization_info'] = authorization_info
+        use_authorization_server(authorization_info)
+        super
+      rescue DiscoveryError => e
+        fail!(e.key, e)
       end
 
-      option :setup, setup
+      def callback_phase
+        authorization_info = session.delete('authorization_info')
+        return fail!(:missing_authorization_info, OmniAuth::Error.new('No authorization request in progress')) unless authorization_info
+
+        use_authorization_server(authorization_info)
+        super
+      end
+
+      # The redirect_uri has to match the client metadata exactly, so leave off the query string
+      def callback_url
+        full_host + callback_path
+      end
 
     private
 
@@ -57,7 +60,7 @@ module OmniAuth
                                  code: request.params['code'],
                                  jwk: options.client_jwk,
                                  client_id: options.client_id,
-                                 redirect_uri: full_host + callback_path,
+                                 redirect_uri: callback_url,
                                  site: options.client_options.site,
                                  endpoint: options.client_options.token_url
                                }).to_h.transform_keys(&:to_sym)
@@ -65,47 +68,55 @@ module OmniAuth
         ::OAuth2::AccessToken.from_hash(client, response)
       end
 
-      def self.get_authorization_server(pds_endpoint)
-        response = Faraday.get("#{pds_endpoint}/.well-known/oauth-protected-resource")
+      def discover_authorization_server(handle)
+        handle = handle.to_s.strip
+        raise DiscoveryError.new(:missing_handle, 'Handle parameter is missing') if handle.empty?
 
-        unless response.success?
-          fail!(:invalid_auth_server,
-                OmniAuth::Error.new(
-                  "Failed to get PDS authorization server: #{response.status}"
-                ))
-        end
-
-        result = JSON.parse(response.body)
-
-        auth_server = result.dig('authorization_servers', 0)
-        unless auth_server
-          fail!(:invalid_auth_server,
-                OmniAuth::Error.new('No authorization server found in response'))
-        end
-        auth_server
+        pds_endpoint = discovery_step(:unknown_handle) { resolve_pds(handle) }
+        issuer = discovery_step(:invalid_auth_server) { get_authorization_server(pds_endpoint) }
+        discovery_step(:invalid_metadata) { get_authorization_data(issuer) }
       end
 
-      def self.get_authorization_data(issuer)
+      # Discovery follows documents from user input, so any failure fails the login
+      def discovery_step(key)
+        yield
+      rescue StandardError => e
+        raise DiscoveryError.new(key, e.message)
+      end
+
+      def use_authorization_server(authorization_info)
+        options.client_options.site = authorization_info['issuer']
+        options.client_options.authorize_url = authorization_info['authorization_endpoint']
+        options.client_options.token_url = authorization_info['token_endpoint']
+      end
+
+      def resolve_pds(handle)
+        resolver = DIDKit::Resolver.new
+        did = resolver.resolve_handle(handle)
+        raise OmniAuth::Error.new('Handle parameter did not resolve to a did') unless did
+
+        resolver.resolve_did(did).pds_endpoint or raise OmniAuth::Error.new('DID document has no PDS endpoint')
+      end
+
+      def get_authorization_server(pds_endpoint)
+        response = Faraday.get("#{pds_endpoint}/.well-known/oauth-protected-resource")
+        raise OmniAuth::Error.new("Failed to get PDS authorization server: #{response.status}") unless response.success?
+
+        JSON.parse(response.body).dig('authorization_servers', 0) or
+          raise OmniAuth::Error.new('No authorization server found in response')
+      end
+
+      def get_authorization_data(issuer)
         response = Faraday.get("#{issuer}/.well-known/oauth-authorization-server")
+        raise OmniAuth::Error.new("Failed to get authorization server metadata: #{response.status}") unless response.success?
 
-        unless response.success?
-          fail!(:invalid_metadata,
-                OmniAuth::Error.new(
-                  "Failed to get authorization server metadata: #{response.status}"
-                ))
-        end
         result = JSON.parse(response.body)
+        raise OmniAuth::Error.new('Invalid metadata - issuer mismatch') unless result['issuer'] == issuer
 
-        unless result['issuer'] == issuer
-          fail!(:invalid_metadata,
-                OmniAuth::Error.new('Invalid metadata - issuer mismatch'))
-        end
         # we cannot keep everything in session (cookie overflow error)
         fields = %w[issuer authorization_endpoint token_endpoint]
         result.slice(*fields)
       end
-
-      private_class_method :get_authorization_server, :get_authorization_data
     end
   end
 end
