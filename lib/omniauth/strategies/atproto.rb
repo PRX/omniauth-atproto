@@ -60,7 +60,7 @@ module OmniAuth
                                  redirect_uri: full_host + callback_path,
                                  site: options.client_options.site,
                                  endpoint: options.client_options.token_url
-                               }).to_h.symbolize_keys
+                               }).to_h.transform_keys(&:to_sym)
         )
         ::OAuth2::AccessToken.from_hash(client, response)
       end
