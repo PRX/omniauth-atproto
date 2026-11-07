@@ -21,35 +21,35 @@ module OmniAuth
 
       def self.setup
         lambda do |env|
-          session = env["rack.session"]
+          session = env['rack.session']
 
-          if env["rack.request.form_hash"] && handle = env["rack.request.form_hash"]["handle"]
+          if env['rack.request.form_hash'] && (handle = env['rack.request.form_hash']['handle'])
             resolver = DIDKit::Resolver.new
             did = resolver.resolve_handle(handle)
 
             unless did
               env['omniauth.strategy'].fail!(:unknown_handle,
-                OmniAuth::Error.new(
-                  'Handle parameter did not resolve to a did'
-                ))
+                                             OmniAuth::Error.new(
+                                               'Handle parameter did not resolve to a did'
+                                             ))
             end
 
             endpoint = resolver.resolve_did(did).pds_endpoint
             auth_server = get_authorization_server(endpoint)
-            session["authorization_info"] = authorization_info = get_authorization_data(auth_server)
+            session['authorization_info'] = authorization_info = get_authorization_data(auth_server)
           end
-          
-          if authorization_info ||= session.delete("authorization_info")
-            env['omniauth.strategy'].options["client_options"]["site"] = authorization_info["issuer"]
-            env['omniauth.strategy'].options["client_options"]["authorize_url"] = authorization_info['authorization_endpoint']
-            env['omniauth.strategy'].options["client_options"]["token_url"] = authorization_info['token_endpoint']
+
+          if authorization_info ||= session.delete('authorization_info')
+            env['omniauth.strategy'].options['client_options']['site'] = authorization_info['issuer']
+            env['omniauth.strategy'].options['client_options']['authorize_url'] = authorization_info['authorization_endpoint']
+            env['omniauth.strategy'].options['client_options']['token_url'] = authorization_info['token_endpoint']
           end
         end
       end
 
       option :setup, setup
 
-      private
+    private
 
       def build_access_token
         response = AtProto::Client.new(private_key: options.private_key).get_token!(
@@ -102,8 +102,10 @@ module OmniAuth
         end
         # we cannot keep everything in session (cookie overflow error)
         fields = %w[issuer authorization_endpoint token_endpoint]
-        result.select { |k, _v| fields.include?(k) }
+        result.slice(*fields)
       end
+
+      private_class_method :get_authorization_server, :get_authorization_data
     end
   end
 end

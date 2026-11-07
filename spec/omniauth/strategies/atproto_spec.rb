@@ -9,7 +9,7 @@ RSpec.describe OmniAuth::Strategies::Atproto do
       # Parses the form before the strategy, as Rails and Sinatra do
       use Rack::MethodOverride
       use OmniAuth::Strategies::Atproto, client_id, nil, scope: 'atproto', private_key: key, client_jwk: jwk
-      run ->(env) { [200, { 'content-type' => 'application/json' }, [env['omniauth.auth'].to_h.to_json]] }
+      run ->(env) { [200, {'content-type' => 'application/json'}, [env['omniauth.auth'].to_h.to_json]] }
     end
   end
 
@@ -67,9 +67,9 @@ RSpec.describe OmniAuth::Strategies::Atproto do
 
     it 'pushes the authorization request (PAR) and redirects with its request_uri' do
       pending 'PAR is not implemented yet'
-      stub_request(:post, "#{AtprotoStubs::ISSUER}/oauth/par")
-        .to_return(status: 201, body: { request_uri: 'urn:ietf:params:oauth:request_uri:abc', expires_in: 60 }.to_json,
-                   headers: { 'Content-Type' => 'application/json' })
+      stub_request(:post, "#{AtprotoStubs::ISSUER}/oauth/par").
+        to_return(status: 201, body: {request_uri: 'urn:ietf:params:oauth:request_uri:abc', expires_in: 60}.to_json,
+                  headers: {'Content-Type' => 'application/json'})
 
       post '/auth/atproto', handle: AtprotoStubs::HANDLE
 
@@ -84,7 +84,7 @@ RSpec.describe OmniAuth::Strategies::Atproto do
       post '/auth/atproto', handle: AtprotoStubs::HANDLE
 
       expect(failure_message).to eq('invalid_auth_server')
-      expect(a_request(:get, %r{169\.254\.169\.254})).not_to have_been_made
+      expect(a_request(:get, /169\.254\.169\.254/)).not_to have_been_made
     end
   end
 
@@ -99,11 +99,11 @@ RSpec.describe OmniAuth::Strategies::Atproto do
       expect(last_response.status).to eq(200)
       auth = JSON.parse(last_response.body)
       expect(auth.dig('info', 'did')).to eq(AtprotoStubs::DID)
-      expect(a_request(:post, "#{AtprotoStubs::ISSUER}/oauth/token").with { |req|
+      expect(a_request(:post, "#{AtprotoStubs::ISSUER}/oauth/token").with do |req|
         body = JSON.parse(req.body)
         body['grant_type'] == 'authorization_code' && body['code'] == 'auth-code' &&
           body['code_verifier'] && body['client_assertion'] && req.headers['Dpop']
-      }).to have_been_made
+      end).to have_been_made
     end
 
     it 'sets the uid to the DID' do
@@ -140,10 +140,10 @@ RSpec.describe OmniAuth::Strategies::Atproto do
       sign_in
 
       client_jwk = client_key_pair.last
-      expect(a_request(:post, "#{AtprotoStubs::ISSUER}/oauth/token").with { |req|
+      expect(a_request(:post, "#{AtprotoStubs::ISSUER}/oauth/token").with do |req|
         header = JWT.decode(req.headers['Dpop'], nil, false).last
         header.dig('jwk', 'x') != client_jwk[:x]
-      }).to have_been_made
+      end).to have_been_made
     end
   end
 end

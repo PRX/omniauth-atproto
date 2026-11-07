@@ -20,16 +20,16 @@ module AtprotoStubs
     document = {
       id: did,
       alsoKnownAs: ["at://#{handle}"],
-      service: [{ id: '#atproto_pds', type: 'AtprotoPersonalDataServer', serviceEndpoint: pds }]
+      service: [{id: '#atproto_pds', type: 'AtprotoPersonalDataServer', serviceEndpoint: pds}]
     }
-    stub_request(:get, "https://plc.directory/#{did}")
-      .to_return(body: document.to_json, headers: { 'Content-Type' => 'application/did+ld+json' })
+    stub_request(:get, "https://plc.directory/#{did}").
+      to_return(body: document.to_json, headers: {'Content-Type' => 'application/did+ld+json'})
   end
 
   def stub_protected_resource(pds: PDS, issuer: ISSUER)
-    stub_request(:get, "#{pds}/.well-known/oauth-protected-resource")
-      .to_return(body: { resource: pds, authorization_servers: [issuer] }.to_json,
-                 headers: { 'Content-Type' => 'application/json' })
+    stub_request(:get, "#{pds}/.well-known/oauth-protected-resource").
+      to_return(body: {resource: pds, authorization_servers: [issuer]}.to_json,
+                headers: {'Content-Type' => 'application/json'})
   end
 
   def stub_authorization_server(issuer: ISSUER, metadata_issuer: issuer)
@@ -40,8 +40,8 @@ module AtprotoStubs
       pushed_authorization_request_endpoint: "#{issuer}/oauth/par",
       require_pushed_authorization_requests: true
     }
-    stub_request(:get, "#{issuer}/.well-known/oauth-authorization-server")
-      .to_return(body: metadata.to_json, headers: { 'Content-Type' => 'application/json' })
+    stub_request(:get, "#{issuer}/.well-known/oauth-authorization-server").
+      to_return(body: metadata.to_json, headers: {'Content-Type' => 'application/json'})
   end
 
   def stub_discovery(**opts)
@@ -53,9 +53,9 @@ module AtprotoStubs
 
   def stub_token(issuer: ISSUER, sub: DID, scope: 'atproto')
     stub_request(:post, "#{issuer}/oauth/token").to_return(
-      body: { access_token: 'access', refresh_token: 'refresh', token_type: 'DPoP',
-              expires_in: 3600, scope: scope, sub: sub }.to_json,
-      headers: { 'Content-Type' => 'application/json' }
+      body: {access_token: 'access', refresh_token: 'refresh', token_type: 'DPoP',
+              expires_in: 3600, scope: scope, sub: sub}.to_json,
+      headers: {'Content-Type' => 'application/json'}
     )
   end
 end

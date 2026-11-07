@@ -1,0 +1,28 @@
+name: Security
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+
+# The jobs only read the repository, so don't give them write access.
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Set up Ruby
+      uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1.335.0
+      with:
+        ruby-version: '4.0'
+        bundler-cache: true
+    # --force because brakeman otherwise only scans Rails apps
+    - name: Scan for common security vulnerabilities using static analysis
+      run: bundle exec brakeman --force --quiet --no-pager --exit-on-warn --exit-on-error
+    - name: Scan for known security vulnerabilities in gems used
+      run: bundle exec bundle-audit check --update

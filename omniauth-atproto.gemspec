@@ -17,6 +17,7 @@ Gem::Specification.new do |spec|
   spec.metadata['homepage_uri'] = spec.homepage
   spec.metadata['source_code_uri'] = spec.homepage
   spec.metadata['changelog_uri'] = "#{spec.homepage}/blob/master/CHANGELOG.md"
+  spec.metadata['rubygems_mfa_required'] = 'true'
 
   spec.files = Dir['{bin,lib}/**/*', 'LICENSE', 'README.md']
   spec.bindir = 'exe'
@@ -28,9 +29,4 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'faraday'
   spec.add_dependency 'jwt', '>= 2.7'
   spec.add_dependency 'omniauth-oauth2', '~> 1.8'
-  spec.add_development_dependency 'rake', '~> 13.0'
-  spec.add_development_dependency 'rack-session', '~> 2.0'
-  spec.add_development_dependency 'rack-test', '~> 2.1'
-  spec.add_development_dependency 'rspec', '~> 3.0'
-  spec.add_development_dependency 'webmock', '~> 3.23'
 end

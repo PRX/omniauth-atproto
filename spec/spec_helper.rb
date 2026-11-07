@@ -1,3 +1,9 @@
+require 'simplecov'
+SimpleCov.start do
+  enable_coverage :branch
+  add_filter '/spec/'
+end
+
 require 'omniauth-atproto'
 require 'rack/test'
 require 'rack/session'

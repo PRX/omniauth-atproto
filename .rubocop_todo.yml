@@ -1,0 +1,6 @@
+# Existing methods over the 15-line limit, to shorten as they're reworked.
+Metrics/MethodLength:
+  Exclude:
+    - lib/omniauth-atproto/key_manager.rb
+    - lib/omniauth-atproto/metadata_generator.rb
+    - lib/omniauth/strategies/atproto.rb
