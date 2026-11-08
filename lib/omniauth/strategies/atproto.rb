@@ -22,6 +22,8 @@ module OmniAuth
       option :scope, 'atproto'
       option :pkce, true
 
+      uid { @access_token.params['sub'] }
+
       info do
         {
           did: @access_token.params['sub'],
