@@ -130,7 +130,6 @@ RSpec.describe OmniAuth::Strategies::Atproto do
     end
 
     it 'sets the uid to the DID' do
-      pending 'the strategy does not define uid'
       stub_token
 
       sign_in
