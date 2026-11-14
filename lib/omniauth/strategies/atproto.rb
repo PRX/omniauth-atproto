@@ -26,11 +26,15 @@ module OmniAuth
       # The tokens are bound to this login's DPoP key, so apps that keep them need it too
       credentials { {'dpop_key' => @dpop_key.to_pem} }
 
+      # The PDS hosts the account's data and API, so apps that keep the tokens call it.
+      # The issuer is the authorization server, which isn't always the PDS.
       info do
         {
           did: @access_token.params['sub'],
           nickname: verified_handle,
-          pds_host: options.client_options.site
+          pds_host: did_document&.pds_endpoint,
+          issuer: options.client_options.site,
+          scope: @access_token.params['scope']
         }
       end
 
@@ -84,8 +88,9 @@ module OmniAuth
           endpoint: options.client_options.token_url
         ).to_h.transform_keys(&:to_sym)
         response = login_step(:invalid_credentials) { atproto_client.get_token!(**params) }
-        # The token has to be for the account the handle resolved to
+        # The token has to be for the account the handle resolved to, and grant atproto
         raise LoginError.new(:did_mismatch, "Token is for #{response['sub'].inspect}, not #{@expected_did}") unless response['sub'] == @expected_did
+        raise LoginError.new(:invalid_scope, "Token scope #{response['scope'].inspect} lacks atproto") unless response['scope'].to_s.split.include?('atproto')
 
         ::OAuth2::AccessToken.from_hash(client, response)
       end
@@ -117,10 +122,21 @@ module OmniAuth
         }
       end
 
+      # The account's DID document, or nil if it can't be fetched now
+      def did_document
+        return @did_document if defined?(@did_document)
+
+        @did_document = begin
+          OmniAuth::Atproto::Resolver.new.resolve_did(@access_token.params['sub'])
+        rescue StandardError
+          nil
+        end
+      end
+
       # The handle the DID claims, if it resolves back to the DID. The user may have
       # signed in to a different account than the handle they typed.
       def verified_handle
-        @verified_handle ||= OmniAuth::Atproto::Resolver.new.get_verified_handle(@access_token.params['sub'])
+        @verified_handle ||= OmniAuth::Atproto::Resolver.new.get_verified_handle(did_document) if did_document
       rescue StandardError
         nil
       end

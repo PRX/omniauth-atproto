@@ -162,6 +162,7 @@ RSpec.describe OmniAuth::Strategies::Atproto do
       auth = JSON.parse(last_response.body)
       expect(auth.dig('info', 'did')).to eq(AtprotoStubs::DID)
       expect(auth.dig('info', 'nickname')).to eq(AtprotoStubs::HANDLE)
+      expect(auth['info']).to include('pds_host' => AtprotoStubs::PDS, 'issuer' => AtprotoStubs::ISSUER, 'scope' => 'atproto')
       expect(a_request(:post, "#{AtprotoStubs::ISSUER}/oauth/token").with do |req|
         body = JSON.parse(req.body)
         body['grant_type'] == 'authorization_code' && body['code'] == 'auth-code' &&
@@ -197,6 +198,14 @@ RSpec.describe OmniAuth::Strategies::Atproto do
       sign_in
 
       expect(failure_message).to eq('invalid_credentials')
+    end
+
+    it 'rejects a token without the atproto scope' do
+      stub_token(scope: 'transition:generic')
+
+      sign_in
+
+      expect(failure_message).to eq('invalid_scope')
     end
 
     it 'rejects a token whose sub is not the DID the handle resolved to' do
