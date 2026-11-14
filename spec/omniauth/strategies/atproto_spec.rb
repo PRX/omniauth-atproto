@@ -39,7 +39,8 @@ RSpec.describe OmniAuth::Strategies::Atproto do
         'redirect_uri' => 'https://app.example.com/auth/atproto/callback',
         'response_type' => 'code',
         'scope' => 'atproto',
-        'code_challenge_method' => 'S256'
+        'code_challenge_method' => 'S256',
+        'login_hint' => AtprotoStubs::HANDLE
       )
       expect(redirect_params['state']).not_to be_empty
       expect(redirect_params['code_challenge']).not_to be_empty
@@ -50,6 +51,13 @@ RSpec.describe OmniAuth::Strategies::Atproto do
 
       expect(last_response.location).to start_with("#{AtprotoStubs::ISSUER}/oauth/authorize?")
       expect(redirect_params['redirect_uri']).to eq('https://app.example.com/auth/atproto/callback')
+    end
+
+    it 'accepts a handle typed with a leading @' do
+      post '/auth/atproto', handle: " @#{AtprotoStubs::HANDLE} "
+
+      expect(last_response.location).to start_with("#{AtprotoStubs::ISSUER}/oauth/authorize?")
+      expect(redirect_params['login_hint']).to eq(AtprotoStubs::HANDLE)
     end
 
     it 'fails cleanly without a handle' do

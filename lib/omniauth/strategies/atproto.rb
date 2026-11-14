@@ -33,9 +33,12 @@ module OmniAuth
 
       # The handle can be posted in the form or the query string
       def request_phase
-        authorization_info = discover_authorization_server(request.params['handle'])
+        handle = request.params['handle'].to_s.strip.delete_prefix('@')
+        authorization_info = discover_authorization_server(handle)
         session['authorization_info'] = authorization_info
         use_authorization_server(authorization_info)
+        # Lets the authorization server preselect the account
+        options.authorize_params[:login_hint] = handle
         super
       rescue DiscoveryError => e
         fail!(e.key, e)
@@ -71,7 +74,6 @@ module OmniAuth
       end
 
       def discover_authorization_server(handle)
-        handle = handle.to_s.strip
         raise DiscoveryError.new(:missing_handle, 'Handle parameter is missing') if handle.empty?
 
         pds_endpoint = discovery_step(:unknown_handle) { resolve_pds(handle) }
