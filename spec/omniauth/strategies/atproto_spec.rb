@@ -160,7 +160,6 @@ RSpec.describe OmniAuth::Strategies::Atproto do
     end
 
     it 'rejects a token whose sub is not the DID the handle resolved to' do
-      pending 'the token sub is not checked against the handle'
       stub_token(sub: 'did:plc:malloryaaaaaaaaaaaaaaaaa')
 
       sign_in
@@ -169,10 +168,18 @@ RSpec.describe OmniAuth::Strategies::Atproto do
     end
 
     it 'rejects a callback from a different issuer' do
-      pending 'the iss callback parameter is not checked'
       stub_token
 
       sign_in(iss: 'https://other.example.com')
+
+      expect(failure_message).to eq('issuer_mismatch')
+      expect(a_request(:post, "#{AtprotoStubs::ISSUER}/oauth/token")).not_to have_been_made
+    end
+
+    it 'rejects a callback without an issuer' do
+      stub_token
+
+      sign_in(iss: nil)
 
       expect(failure_message).to eq('issuer_mismatch')
     end
