@@ -33,6 +33,10 @@ Metrics/BlockLength:
 Metrics/BlockNesting:
   Max: 2
 
+# As omniauth-oauth2, whose strategy this one extends
+Metrics/ClassLength:
+  Max: 160
+
 Metrics/MethodLength:
   CountComments: false
   Max: 15

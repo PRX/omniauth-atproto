@@ -4,6 +4,7 @@ require 'net/http'
 require 'atproto_client'
 require 'didkit'
 require 'faraday'
+require 'jwt'
 
 module OmniAuth
   module Strategies
@@ -40,7 +41,7 @@ module OmniAuth
         use_authorization_server(authorization_info)
         # Lets the authorization server preselect the account
         options.authorize_params[:login_hint] = handle
-        super
+        redirect pushed_authorization_url(authorization_info)
       rescue LoginError => e
         fail!(e.key, e)
       end
@@ -84,6 +85,33 @@ module OmniAuth
         ::OAuth2::AccessToken.from_hash(client, response)
       end
 
+      # Pushes the authorization request to the server (PAR, which atproto requires),
+      # so the browser only carries a reference to it
+      def pushed_authorization_url(authorization_info)
+        params = {response_type: 'code', client_id: options.client_id, redirect_uri: callback_url}.merge(authorize_params)
+        response = login_step(:pushed_authorization_failed) do
+          AtProto::DpopHandler.new(options.private_key).make_request(
+            authorization_info['pushed_authorization_request_endpoint'],
+            :post,
+            headers: {'Content-Type' => 'application/x-www-form-urlencoded'},
+            body: URI.encode_www_form(params.merge(client_assertion_params))
+          )
+        end
+        request_uri = response['request_uri'] or raise LoginError.new(:pushed_authorization_failed, 'No request_uri in response')
+
+        "#{options.client_options.authorize_url}?#{URI.encode_www_form(client_id: options.client_id, request_uri: request_uri)}"
+      end
+
+      # Authenticates this client with a JWT signed by its key (private_key_jwt)
+      def client_assertion_params
+        now = Time.now.to_i
+        payload = {iss: options.client_id, sub: options.client_id, aud: options.client_options.site, jti: SecureRandom.uuid, iat: now, exp: now + 300}
+        {
+          client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+          client_assertion: JWT.encode(payload, options.private_key, 'ES256', {typ: 'jwt', kid: options.client_jwk[:kid]})
+        }
+      end
+
       # The handle the DID claims, if it resolves back to the DID. The user may have
       # signed in to a different account than the handle they typed.
       def verified_handle
@@ -95,13 +123,13 @@ module OmniAuth
       def discover_authorization_server(handle)
         raise LoginError.new(:missing_handle, 'Handle parameter is missing') if handle.empty?
 
-        did, pds_endpoint = discovery_step(:unknown_handle) { resolve_pds(handle) }
-        issuer = discovery_step(:invalid_auth_server) { get_authorization_server(pds_endpoint) }
-        discovery_step(:invalid_metadata) { get_authorization_data(issuer) }.merge('did' => did)
+        did, pds_endpoint = login_step(:unknown_handle) { resolve_pds(handle) }
+        issuer = login_step(:invalid_auth_server) { get_authorization_server(pds_endpoint) }
+        login_step(:invalid_metadata) { get_authorization_data(issuer) }.merge('did' => did)
       end
 
-      # Discovery follows documents from user input, so any failure fails the login
-      def discovery_step(key)
+      # Each step follows documents found from user input, so any failure fails the login
+      def login_step(key)
         yield
       rescue StandardError => e
         raise LoginError.new(key, e.message)
@@ -139,9 +167,10 @@ module OmniAuth
 
         result = JSON.parse(response.body)
         raise OmniAuth::Error.new('Invalid metadata - issuer mismatch') unless result['issuer'] == issuer
+        raise OmniAuth::Error.new('Invalid metadata - no pushed authorization request endpoint') unless result['pushed_authorization_request_endpoint']
 
         # we cannot keep everything in session (cookie overflow error)
-        fields = %w[issuer authorization_endpoint token_endpoint]
+        fields = %w[issuer authorization_endpoint token_endpoint pushed_authorization_request_endpoint]
         result.slice(*fields)
       end
     end

@@ -49,7 +49,24 @@ module AtprotoStubs
     stub_did_document(**opts.slice(:handle, :did, :pds))
     stub_protected_resource(**opts.slice(:pds, :issuer))
     stub_authorization_server(**opts.slice(:issuer))
+    stub_par(**opts.slice(:issuer))
   end
+
+  REQUEST_URI = 'urn:ietf:params:oauth:request_uri:abc'.freeze
+
+  # Records the pushed parameters; with a nonce, first asks for it as servers do
+  def stub_par(issuer: ISSUER, nonce: nil)
+    stub_request(:post, "#{issuer}/oauth/par").to_return do |request|
+      if nonce && !JWT.decode(request.headers['Dpop'], nil, false).first['nonce']
+        {status: 400, body: {error: 'use_dpop_nonce'}.to_json, headers: {'Content-Type' => 'application/json', 'DPoP-Nonce' => nonce}}
+      else
+        @pushed_params = URI.decode_www_form(request.body).to_h
+        {status: 201, body: {request_uri: REQUEST_URI, expires_in: 60}.to_json, headers: {'Content-Type' => 'application/json'}}
+      end
+    end
+  end
+
+  attr_reader :pushed_params
 
   def stub_token(issuer: ISSUER, sub: DID, scope: 'atproto')
     stub_request(:post, "#{issuer}/oauth/token").to_return(
