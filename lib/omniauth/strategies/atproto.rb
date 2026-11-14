@@ -27,6 +27,7 @@ module OmniAuth
       info do
         {
           did: @access_token.params['sub'],
+          nickname: verified_handle,
           pds_host: options.client_options.site
         }
       end
@@ -71,6 +72,14 @@ module OmniAuth
                                }).to_h.transform_keys(&:to_sym)
         )
         ::OAuth2::AccessToken.from_hash(client, response)
+      end
+
+      # The handle the DID claims, if it resolves back to the DID. The user may have
+      # signed in to a different account than the handle they typed.
+      def verified_handle
+        @verified_handle ||= DIDKit::Resolver.new.get_verified_handle(@access_token.params['sub'])
+      rescue StandardError
+        nil
       end
 
       def discover_authorization_server(handle)

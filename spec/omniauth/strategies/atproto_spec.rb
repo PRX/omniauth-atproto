@@ -130,11 +130,25 @@ RSpec.describe OmniAuth::Strategies::Atproto do
       expect(last_response.status).to eq(200)
       auth = JSON.parse(last_response.body)
       expect(auth.dig('info', 'did')).to eq(AtprotoStubs::DID)
+      expect(auth.dig('info', 'nickname')).to eq(AtprotoStubs::HANDLE)
       expect(a_request(:post, "#{AtprotoStubs::ISSUER}/oauth/token").with do |req|
         body = JSON.parse(req.body)
         body['grant_type'] == 'authorization_code' && body['code'] == 'auth-code' &&
           body['code_verifier'] && body['client_assertion'] && req.headers['Dpop']
       end).to have_been_made
+    end
+
+    it "leaves out a handle that doesn't resolve back to the DID" do
+      stub_token
+      post '/auth/atproto', handle: AtprotoStubs::HANDLE
+      state = redirect_params['state']
+      # By the callback, the DID document's handle points at another account
+      stub_request(:get, "https://#{AtprotoStubs::HANDLE}/.well-known/atproto-did").to_return(body: 'did:plc:malloryaaaaaaaaaaaaaaaaa')
+
+      get '/auth/atproto/callback', code: 'auth-code', state: state, iss: AtprotoStubs::ISSUER
+
+      expect(last_response.status).to eq(200)
+      expect(JSON.parse(last_response.body).dig('info', 'nickname')).to be_nil
     end
 
     it 'sets the uid to the DID' do
