@@ -11,7 +11,7 @@ module OmniAuth
           grant_types: %w[authorization_code refresh_token],
           redirect_uris: [options[:redirect_uri]],
           response_types: ['code'],
-          scope: options[:scope] || 'atproto transition:generic',
+          scope: options[:scope] || 'atproto',
           token_endpoint_auth_method: 'private_key_jwt',
           token_endpoint_auth_signing_alg: 'ES256',
           jwks: {

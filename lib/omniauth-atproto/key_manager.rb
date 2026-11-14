@@ -1,6 +1,7 @@
+require 'fileutils'
+require 'json'
 require 'openssl'
 require 'jwt'
-require 'base64'
 
 module OmniAuth
   module Atproto
@@ -11,30 +12,18 @@ module OmniAuth
 
         def generate_key_pair
           key = OpenSSL::PKey::EC.generate('prime256v1')
-          private_key = key
-          public_key = key.public_key
+          [key, public_jwk(key)]
+        end
 
-          # Get the coordinates for JWK
-          # (not easy with openssl 3)
-          bn = public_key.to_bn(:uncompressed)
-          raw_bytes = bn.to_s(2)
-          coord_bytes = raw_bytes[1..]
-          byte_length = coord_bytes.length / 2
+        # Loads a key from a PEM (from an environment variable or secret store, say)
+        def load_key_pair(pem)
+          key = OpenSSL::PKey::EC.new(pem)
+          [key, public_jwk(key)]
+        end
 
-          x_coord = coord_bytes[0, byte_length]
-          y_coord = coord_bytes[byte_length, byte_length]
-
-          jwk = {
-            kty: 'EC',
-            crv: 'P-256',
-            x: Base64.urlsafe_encode64(x_coord, padding: false),
-            y: Base64.urlsafe_encode64(y_coord, padding: false),
-            use: 'sig',
-            alg: 'ES256',
-            kid: SecureRandom.uuid
-          }.freeze
-
-          [private_key, jwk]
+        # The public key for the client metadata's jwks, with its thumbprint as the kid
+        def public_jwk(key)
+          JWT::JWK.new(key, {use: 'sig', alg: 'ES256'}, kid_generator: JWT::JWK::Thumbprint).export.freeze
         end
 
         def current_private_key
@@ -47,14 +36,9 @@ module OmniAuth
 
         def rotate_keys
           # Backup current keys if they exist
-          if File.exist?(KEY_PATH)
-            File.write(KEY_PATH, 'config/old_atproto_private_key.pem')
-            FileUtils.rm(KEY_PATH)
-          end
-          if File.exist?(JWK_PATH)
-            File.write(JWK_PATH, 'config/old_atproto_jwk.json')
-            FileUtils.rm(JWK_PATH)
-          end
+          FileUtils.mv(KEY_PATH, 'config/old_atproto_private_key.pem') if File.exist?(KEY_PATH)
+          FileUtils.mv(JWK_PATH, 'config/old_atproto_jwk.json') if File.exist?(JWK_PATH)
+          @current_private_key = @current_jwk = nil
           load_or_generate_keys
         end
 
