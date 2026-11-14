@@ -17,7 +17,7 @@ RSpec.describe OmniAuth::Strategies::Atproto do
 
   def sign_in(handle: AtprotoStubs::HANDLE, iss: AtprotoStubs::ISSUER)
     post '/auth/atproto', handle: handle
-    state = redirect_params['state']
+    state = pushed_params['state']
     get '/auth/atproto/callback', code: 'auth-code', state: state, iss: iss
   end
 
@@ -29,35 +29,62 @@ RSpec.describe OmniAuth::Strategies::Atproto do
   describe 'request phase' do
     before { stub_discovery }
 
-    it "redirects to the authorization server of the handle's PDS" do
+    it "pushes the authorization request (PAR) to the handle's authorization server" do
       post '/auth/atproto', handle: AtprotoStubs::HANDLE
 
-      expect(last_response.status).to eq(302)
-      expect(last_response.location).to start_with("#{AtprotoStubs::ISSUER}/oauth/authorize?")
-      expect(redirect_params).to include(
+      expect(pushed_params).to include(
         'client_id' => AtprotoStubs::CLIENT_ID,
         'redirect_uri' => 'https://app.example.com/auth/atproto/callback',
         'response_type' => 'code',
         'scope' => 'atproto',
         'code_challenge_method' => 'S256',
-        'login_hint' => AtprotoStubs::HANDLE
+        'login_hint' => AtprotoStubs::HANDLE,
+        'client_assertion_type' => 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer'
       )
-      expect(redirect_params['state']).not_to be_empty
-      expect(redirect_params['code_challenge']).not_to be_empty
+      expect(pushed_params.values_at('state', 'code_challenge', 'client_assertion')).to all(match(/\S/))
+      expect(a_request(:post, "#{AtprotoStubs::ISSUER}/oauth/par").with(headers: {'Dpop' => /\A[\w-]+\.[\w-]+\.[\w-]+\z/})).to have_been_made
+    end
+
+    it 'redirects with only the client_id and request_uri' do
+      post '/auth/atproto', handle: AtprotoStubs::HANDLE
+
+      expect(last_response.status).to eq(302)
+      expect(last_response.location).to start_with("#{AtprotoStubs::ISSUER}/oauth/authorize?")
+      expect(redirect_params).to eq('client_id' => AtprotoStubs::CLIENT_ID, 'request_uri' => AtprotoStubs::REQUEST_URI)
+    end
+
+    it 'retries the push with the DPoP nonce the server asks for' do
+      stub_par(nonce: 'server-nonce')
+
+      post '/auth/atproto', handle: AtprotoStubs::HANDLE
+
+      expect(redirect_params['request_uri']).to eq(AtprotoStubs::REQUEST_URI)
+      expect(a_request(:post, "#{AtprotoStubs::ISSUER}/oauth/par").with do |req|
+        JWT.decode(req.headers['Dpop'], nil, false).first['nonce'] == 'server-nonce'
+      end).to have_been_made
+    end
+
+    it 'fails cleanly when the push is rejected' do
+      stub_request(:post, "#{AtprotoStubs::ISSUER}/oauth/par").
+        to_return(status: 400, body: {error: 'invalid_client'}.to_json, headers: {'Content-Type' => 'application/json'})
+
+      post '/auth/atproto', handle: AtprotoStubs::HANDLE
+
+      expect(failure_message).to eq('pushed_authorization_failed')
     end
 
     it 'reads the handle from the query string, leaving it out of the redirect_uri' do
       post "/auth/atproto?handle=#{AtprotoStubs::HANDLE}"
 
       expect(last_response.location).to start_with("#{AtprotoStubs::ISSUER}/oauth/authorize?")
-      expect(redirect_params['redirect_uri']).to eq('https://app.example.com/auth/atproto/callback')
+      expect(pushed_params['redirect_uri']).to eq('https://app.example.com/auth/atproto/callback')
     end
 
     it 'accepts a handle typed with a leading @' do
       post '/auth/atproto', handle: " @#{AtprotoStubs::HANDLE} "
 
       expect(last_response.location).to start_with("#{AtprotoStubs::ISSUER}/oauth/authorize?")
-      expect(redirect_params['login_hint']).to eq(AtprotoStubs::HANDLE)
+      expect(pushed_params['login_hint']).to eq(AtprotoStubs::HANDLE)
     end
 
     it 'fails cleanly without a handle' do
@@ -88,18 +115,6 @@ RSpec.describe OmniAuth::Strategies::Atproto do
       post '/auth/atproto', handle: AtprotoStubs::HANDLE
 
       expect(failure_message).to eq('invalid_metadata')
-    end
-
-    it 'pushes the authorization request (PAR) and redirects with its request_uri' do
-      pending 'PAR is not implemented yet'
-      stub_request(:post, "#{AtprotoStubs::ISSUER}/oauth/par").
-        to_return(status: 201, body: {request_uri: 'urn:ietf:params:oauth:request_uri:abc', expires_in: 60}.to_json,
-                  headers: {'Content-Type' => 'application/json'})
-
-      post '/auth/atproto', handle: AtprotoStubs::HANDLE
-
-      expect(redirect_params).to eq('client_id' => AtprotoStubs::CLIENT_ID,
-                                    'request_uri' => 'urn:ietf:params:oauth:request_uri:abc')
     end
 
     it 'refuses to fetch discovery documents from a private address' do
@@ -141,7 +156,7 @@ RSpec.describe OmniAuth::Strategies::Atproto do
     it "leaves out a handle that doesn't resolve back to the DID" do
       stub_token
       post '/auth/atproto', handle: AtprotoStubs::HANDLE
-      state = redirect_params['state']
+      state = pushed_params['state']
       # By the callback, the DID document's handle points at another account
       stub_request(:get, "https://#{AtprotoStubs::HANDLE}/.well-known/atproto-did").to_return(body: 'did:plc:malloryaaaaaaaaaaaaaaaaa')
 
