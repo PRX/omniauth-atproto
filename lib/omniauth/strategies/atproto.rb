@@ -8,8 +8,8 @@ require 'faraday'
 module OmniAuth
   module Strategies
     class Atproto < OmniAuth::Strategies::OAuth2
-      # A discovery failure, with the key to fail the strategy with
-      class DiscoveryError < OmniAuth::Error
+      # A failed login, with the key to fail the strategy with
+      class LoginError < OmniAuth::Error
         attr_reader :key
 
         def initialize(key, message)
@@ -41,7 +41,7 @@ module OmniAuth
         # Lets the authorization server preselect the account
         options.authorize_params[:login_hint] = handle
         super
-      rescue DiscoveryError => e
+      rescue LoginError => e
         fail!(e.key, e)
       end
 
@@ -49,8 +49,15 @@ module OmniAuth
         authorization_info = session.delete('authorization_info')
         return fail!(:missing_authorization_info, OmniAuth::Error.new('No authorization request in progress')) unless authorization_info
 
+        # The response has to come from the server the request went to (RFC 9207)
+        issuer = authorization_info['issuer']
+        raise LoginError.new(:issuer_mismatch, "Callback is from #{request.params['iss'].inspect}, not #{issuer}") unless request.params['iss'] == issuer
+
+        @expected_did = authorization_info['did']
         use_authorization_server(authorization_info)
         super
+      rescue LoginError => e
+        fail!(e.key, e)
       end
 
       # The redirect_uri has to match the client metadata exactly, so leave off the query string
@@ -71,6 +78,9 @@ module OmniAuth
                                  endpoint: options.client_options.token_url
                                }).to_h.transform_keys(&:to_sym)
         )
+        # The token has to be for the account the handle resolved to
+        raise LoginError.new(:did_mismatch, "Token is for #{response['sub'].inspect}, not #{@expected_did}") unless response['sub'] == @expected_did
+
         ::OAuth2::AccessToken.from_hash(client, response)
       end
 
@@ -83,18 +93,18 @@ module OmniAuth
       end
 
       def discover_authorization_server(handle)
-        raise DiscoveryError.new(:missing_handle, 'Handle parameter is missing') if handle.empty?
+        raise LoginError.new(:missing_handle, 'Handle parameter is missing') if handle.empty?
 
-        pds_endpoint = discovery_step(:unknown_handle) { resolve_pds(handle) }
+        did, pds_endpoint = discovery_step(:unknown_handle) { resolve_pds(handle) }
         issuer = discovery_step(:invalid_auth_server) { get_authorization_server(pds_endpoint) }
-        discovery_step(:invalid_metadata) { get_authorization_data(issuer) }
+        discovery_step(:invalid_metadata) { get_authorization_data(issuer) }.merge('did' => did)
       end
 
       # Discovery follows documents from user input, so any failure fails the login
       def discovery_step(key)
         yield
       rescue StandardError => e
-        raise DiscoveryError.new(key, e.message)
+        raise LoginError.new(key, e.message)
       end
 
       def use_authorization_server(authorization_info)
@@ -103,12 +113,16 @@ module OmniAuth
         options.client_options.token_url = authorization_info['token_endpoint']
       end
 
+      # The handle's DID, and the PDS it's hosted on
       def resolve_pds(handle)
         resolver = DIDKit::Resolver.new
         did = resolver.resolve_handle(handle)
         raise OmniAuth::Error.new('Handle parameter did not resolve to a did') unless did
 
-        resolver.resolve_did(did).pds_endpoint or raise OmniAuth::Error.new('DID document has no PDS endpoint')
+        pds_endpoint = resolver.resolve_did(did).pds_endpoint
+        raise OmniAuth::Error.new('DID document has no PDS endpoint') unless pds_endpoint
+
+        [did.to_s, pds_endpoint]
       end
 
       def get_authorization_server(pds_endpoint)
