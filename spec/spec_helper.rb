@@ -21,6 +21,11 @@ RSpec.configure do |config|
   config.include Rack::Test::Methods
   config.include AtprotoStubs
 
+  # ssrf_filter resolves hostnames itself: give them a public address, and IP literals their own
+  config.before do
+    allow(Resolv).to receive(:getaddresses) { |host| host.match?(/\A[\d.]+\z|:/) ? [host] : ['93.184.215.14'] }
+  end
+
   config.expect_with :rspec do |expectations|
     expectations.include_chain_clauses_in_custom_matcher_descriptions = true
   end

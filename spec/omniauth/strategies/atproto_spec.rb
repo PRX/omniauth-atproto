@@ -118,13 +118,29 @@ RSpec.describe OmniAuth::Strategies::Atproto do
     end
 
     it 'refuses to fetch discovery documents from a private address' do
-      pending 'discovery is not SSRF-guarded yet'
       stub_did_document(pds: 'https://169.254.169.254')
 
       post '/auth/atproto', handle: AtprotoStubs::HANDLE
 
       expect(failure_message).to eq('invalid_auth_server')
       expect(a_request(:get, /169\.254\.169\.254/)).not_to have_been_made
+    end
+
+    it 'refuses a handle whose host resolves to a private address' do
+      allow(Resolv).to receive(:getaddresses).with(AtprotoStubs::HANDLE).and_return(['10.0.0.1'])
+
+      post '/auth/atproto', handle: AtprotoStubs::HANDLE
+
+      expect(failure_message).to eq('unknown_handle')
+      expect(a_request(:get, "https://#{AtprotoStubs::HANDLE}/.well-known/atproto-did")).not_to have_been_made
+    end
+
+    it 'refuses a PDS without https' do
+      stub_did_document(pds: 'http://pds.example.com')
+
+      post '/auth/atproto', handle: AtprotoStubs::HANDLE
+
+      expect(failure_message).to eq('invalid_auth_server')
     end
   end
 
@@ -172,6 +188,15 @@ RSpec.describe OmniAuth::Strategies::Atproto do
       sign_in
 
       expect(JSON.parse(last_response.body)['uid']).to eq(AtprotoStubs::DID)
+    end
+
+    it 'fails cleanly when the token request is rejected' do
+      stub_request(:post, "#{AtprotoStubs::ISSUER}/oauth/token").
+        to_return(status: 400, body: {error: 'invalid_grant', error_description: 'Code expired'}.to_json, headers: {'Content-Type' => 'application/json'})
+
+      sign_in
+
+      expect(failure_message).to eq('invalid_credentials')
     end
 
     it 'rejects a token whose sub is not the DID the handle resolved to' do
