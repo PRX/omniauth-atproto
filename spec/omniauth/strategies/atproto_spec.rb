@@ -199,17 +199,40 @@ RSpec.describe OmniAuth::Strategies::Atproto do
       expect(failure_message).to eq('issuer_mismatch')
     end
 
+    def dpop_jwks(path)
+      jwks = []
+      expect(a_request(:post, "#{AtprotoStubs::ISSUER}/oauth/#{path}").with do |req|
+        jwks << JWT.decode(req.headers['Dpop'], nil, false).last['jwk']
+      end).to have_been_made.at_least_once
+      jwks
+    end
+
     it 'signs DPoP proofs with a per-login key, not the client key' do
-      pending 'the client key is reused for DPoP'
       stub_token
 
       sign_in
 
-      client_jwk = client_key_pair.last
-      expect(a_request(:post, "#{AtprotoStubs::ISSUER}/oauth/token").with do |req|
-        header = JWT.decode(req.headers['Dpop'], nil, false).last
-        header.dig('jwk', 'x') != client_jwk[:x]
-      end).to have_been_made
+      expect(dpop_jwks('token').first['x']).not_to eq(client_key_pair.last[:x])
+    end
+
+    it 'uses the same DPoP key for the push and the token request, and returns it' do
+      stub_token
+
+      sign_in
+
+      token_jwk = dpop_jwks('token').first
+      expect(dpop_jwks('par').first).to eq(token_jwk)
+      dpop_key = OpenSSL::PKey::EC.new(JSON.parse(last_response.body).dig('credentials', 'dpop_key'))
+      expect(JWT::JWK.new(dpop_key).export[:x]).to eq(token_jwk['x'])
+    end
+
+    it 'uses a different DPoP key for each login' do
+      stub_token
+
+      sign_in
+      sign_in
+
+      expect(dpop_jwks('token').uniq.size).to eq(2)
     end
   end
 end

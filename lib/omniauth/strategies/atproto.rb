@@ -25,6 +25,9 @@ module OmniAuth
 
       uid { @access_token.params['sub'] }
 
+      # The tokens are bound to this login's DPoP key, so apps that keep them need it too
+      credentials { {'dpop_key' => @dpop_key.to_pem} }
+
       info do
         {
           did: @access_token.params['sub'],
@@ -37,7 +40,8 @@ module OmniAuth
       def request_phase
         handle = request.params['handle'].to_s.strip.delete_prefix('@')
         authorization_info = discover_authorization_server(handle)
-        session['authorization_info'] = authorization_info
+        @dpop_key = OpenSSL::PKey::EC.generate('prime256v1')
+        session['authorization_info'] = authorization_info.merge('dpop_key' => [@dpop_key.to_der].pack('m0'))
         use_authorization_server(authorization_info)
         # Lets the authorization server preselect the account
         options.authorize_params[:login_hint] = handle
@@ -55,6 +59,7 @@ module OmniAuth
         raise LoginError.new(:issuer_mismatch, "Callback is from #{request.params['iss'].inspect}, not #{issuer}") unless request.params['iss'] == issuer
 
         @expected_did = authorization_info['did']
+        @dpop_key = OpenSSL::PKey::EC.new(authorization_info['dpop_key'].unpack1('m0'))
         use_authorization_server(authorization_info)
         super
       rescue LoginError => e
@@ -69,7 +74,10 @@ module OmniAuth
     private
 
       def build_access_token
-        response = AtProto::Client.new(private_key: options.private_key).get_token!(
+        # The client key signs the client assertion, and this login's key the DPoP proofs
+        atproto_client = AtProto::Client.new(private_key: options.private_key)
+        atproto_client.dpop_handler = AtProto::DpopHandler.new(@dpop_key)
+        response = atproto_client.get_token!(
           **token_params.merge({
                                  code: request.params['code'],
                                  jwk: options.client_jwk,
@@ -90,7 +98,7 @@ module OmniAuth
       def pushed_authorization_url(authorization_info)
         params = {response_type: 'code', client_id: options.client_id, redirect_uri: callback_url}.merge(authorize_params)
         response = login_step(:pushed_authorization_failed) do
-          AtProto::DpopHandler.new(options.private_key).make_request(
+          AtProto::DpopHandler.new(@dpop_key).make_request(
             authorization_info['pushed_authorization_request_endpoint'],
             :post,
             headers: {'Content-Type' => 'application/x-www-form-urlencoded'},
